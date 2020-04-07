@@ -20,6 +20,8 @@ disease <- read_xls("/mnt/share6/FOR_Takeo/phenotypdata/Copy of Genetics 01_02_2
                     col_types = "text")
 colnames(disease) <- make.names(colnames(disease))
 
+
+
 # merge key file and disease file 
 target1 <- target %>% 
   left_join(disease,by = c("Genetic_ID" = "Genetic.ID")) %>% 
@@ -65,13 +67,28 @@ length(intersect(target2$RNAseq_ID,answer$seqid))
 # mutate dammy Gender column for regression
 target3 <- target2 %>% 
   left_join(answer,by = c("RNAseq_ID" = "seqid")) %>% 
-  dplyr::select(Genetic_ID,RNAseq_ID,contains("ACE2"),Age.at.Collection,Gender) %>% 
+  dplyr::select(Genetic_ID,RNAseq_ID,contains("ACE2"),Age.at.Collection,Gender) %>%
   mutate(Age.at.Collection = as.numeric(Age.at.Collection)) %>% 
-  mutate(Gender1 = ifelse(Gender == "M",1,0))
+  mutate(Gender1 = ifelse(Gender == "M",1,0)) 
+
+## add admixture and PC data to target3
+admix <-  fread("/mnt/share6/FOR_Takeo/ICHIP/Cedars/no_filter/admixALL_EUR_EAS_AFR.txt")
+pc <- fread("/mnt/share6/FOR_Takeo/ICHIP/PC_ichip1to8washubbc_all.txt") %>% 
+  dplyr::select(FID,PC1,PC2)
+target3 <- target3 %>% 
+  mutate(Genetic_ID = str_replace_all(Genetic_ID,"-","0")) %>% 
+  left_join(admix,by = c("Genetic_ID" = "FID")) %>% 
+  left_join(pc,by = c("Genetic_ID" = "FID") )
+
+
+
 
 # tidy data frame for making facet plot
 target4 <- target3 %>% 
-  gather(contains("ACE"),key = ACE2_sort, value= count_num) 
+  gather(contains("ACE2"),key = ACE2_sort, value= count_num) 
+
+
+
 
 
 # make facet plots for gender and age at collection with regression line.
@@ -87,10 +104,36 @@ p + facet_wrap(~ ACE2_sort,scales="free")
 
 z <- target4 %>% 
   ggplot(aes(x = Age.at.Collection,y = count_num)) + geom_point(size = 0.5) +
-  scale_x_continuous( breaks =seq(0, 74, 5))+
+  scale_x_continuous(breaks = seq(from = 0, to = 75, by = 5))+
   geom_smooth(method = 'glm', formula = y ~x,color = "black") 
 
 z + facet_wrap(~ ACE2_sort,scales="free_y")
 
 
+q <- target4 %>% 
+  ggplot(aes(x = admixEAS,y = count_num)) + geom_point(size = 0.5) +
+  scale_x_continuous(breaks = seq(from = 0, to = 1.0, by = 0.25)) +
+  geom_smooth(method = 'glm', formula = y ~x,color = "black") 
 
+q + facet_wrap(~ ACE2_sort,scales="free")
+
+
+
+# do regression including PC1 and PC2 as covariates
+items <- c("Gender1","Age.at.Collection","admixEUR","admixEAS","admixAFR")
+pval <- data.frame()
+for (i in 1:5) {
+target_item = items[i]
+
+mymodel <- as.formula(paste0("ACE2_count ~  PC1 + PC2 +",target_item))
+my_model <- glm(mymodel, data = target3)
+coef(summary(my_model))[4,4]
+
+
+df <- data.frame(vari = target_item, p_val = coef(summary(my_model))[4,4])
+
+pval <- rbind(pval,df)
+
+
+}
+pval
